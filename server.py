@@ -434,14 +434,34 @@ def start_parent_watcher():
     try:
         import threading
         import ctypes
-        ppid = os.getppid()
-        if ppid <= 4:
+
+        target_pid = os.getppid()
+        current = target_pid
+        for _ in range(4):
+            try:
+                ps_cmd = f'$p = Get-CimInstance Win32_Process | Where-Object ProcessId -eq {current}; "$($p.Name)|$($p.ParentProcessId)"'
+                out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_cmd], text=True, timeout=2).strip()
+                if "|" in out:
+                    name, next_ppid = out.split("|", 1)
+                    if "language_server" in name.lower():
+                        target_pid = current
+                        break
+                    if next_ppid.strip().isdigit():
+                        current = int(next_ppid.strip())
+                        if current <= 4:
+                            break
+                    else:
+                        break
+            except Exception:
+                break
+
+        if target_pid <= 4:
             return
 
         def _watch():
             SYNCHRONIZE = 0x00100000
             kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(SYNCHRONIZE, False, ppid)
+            handle = kernel32.OpenProcess(SYNCHRONIZE, False, target_pid)
             if handle:
                 kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
                 kernel32.CloseHandle(handle)
