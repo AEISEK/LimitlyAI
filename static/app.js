@@ -780,7 +780,6 @@ function renderAnalytics(ag) {
           </span>
           <div class="header-right">
             <span class="collapsed-preview">${usedPct}% · ${formattedCost}</span>
-            <span class="group-badge expanded-badge">${primaryName}</span>
           </div>
         </div>
 
@@ -966,7 +965,6 @@ function renderCards(groups) {
         <div class="group-title collapsible-header" onclick="toggleSection('${secId}', event)" title="${isCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
           <div class="group-title-left">
             <span>${group.displayName}</span>
-            <span class="group-badge expanded-badge">${isGemini ? "Google AI" : "Anthropic"}</span>
           </div>
           <div class="header-right">
             ${remSummary ? `<span class="collapsed-preview">${remSummary}</span>` : ''}
