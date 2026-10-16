@@ -26,6 +26,9 @@ STATIC_DIR = BASE_DIR / "static"
 CONFIG_DIR = Path.home() / ".gemini" / "config"
 SETTINGS_FILE = CONFIG_DIR / "limitlyai_settings.json"
 
+# In-memory mapping of webview session tokens to conversation IDs
+_SESSION_TOKENS = {}
+
 DEFAULT_SETTINGS = {
     "view_mode": "compact",
     "filter": "all",
@@ -129,11 +132,18 @@ def get_workspace_for_conversation(conv_id):
         conn.close()
         if row and row[0]:
             text = row[0].decode("utf-8", errors="ignore")
-            matches = re.findall(r'file:///([a-zA-Z]:/[^\x00-\x1f\x7f"\':]+)', text)
-            if matches:
-                path = os.path.normpath(urllib.parse.unquote(matches[0]))
+            matches = re.findall(r'file:///([a-zA-Z]:/[^\x00-\x1f\x7f"\'\s]+)', text)
+            for m in matches:
+                path = os.path.normpath(urllib.parse.unquote(m))
                 if os.path.isdir(path):
                     return path
+                # Also check under Documents/antigravity/<basename>
+                bname = os.path.basename(path)
+                alt = os.path.normpath(os.path.join(os.path.expanduser("~/Documents/antigravity"), bname))
+                if os.path.isdir(alt):
+                    return alt
+                # Still return the path so basename can be used
+                return path
     except Exception:
         pass
     return None
@@ -161,13 +171,20 @@ def get_project_memory_config(workspace_path):
 
 def resolve_conversation_id(token=None, requested_cid=None):
     """Determine the active conversation ID based on webview token, requested ID, or IDE focus."""
-    # 1. If explicit conversation ID requested and valid
+    # 1. Explicit conversation ID requested (from dropdown or client)
     if requested_cid:
         tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{requested_cid}/.system_generated/logs/transcript.jsonl")
         if os.path.exists(tpath):
             return requested_cid
 
-    # 2. If token passed from webview URL (?token=...)
+    # 2. In-memory session tokens mapping (registered on GET /?token=...&conversationId=...)
+    if token and token in _SESSION_TOKENS:
+        cid = _SESSION_TOKENS[token]
+        tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+        if os.path.exists(tpath):
+            return cid
+
+    # 3. Check aux-pane-v2-session in app_storage.json for token
     if token:
         try:
             path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
@@ -179,11 +196,12 @@ def resolve_conversation_id(token=None, requested_cid=None):
                     for t in pane.get("tabs", []):
                         url = t.get("content", {}).get("sidecarView", {}).get("url", "")
                         if token in url:
+                            _SESSION_TOKENS[token] = cid
                             return cid
         except Exception:
             pass
 
-    # 3. Check projectsConversationOrder from app_storage.json (focused conversation in IDE)
+    # 4. Check projectsConversationOrder from app_storage.json (focused conversation in IDE)
     try:
         path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
         if os.path.exists(path):
@@ -197,7 +215,21 @@ def resolve_conversation_id(token=None, requested_cid=None):
     except Exception:
         pass
 
-    # 4. Fallback: newest modified transcript
+    # 5. Check the most recently modified conversation DB
+    try:
+        db_pattern = os.path.expanduser(r"~/.gemini/antigravity/conversations/*.db")
+        db_files = glob.glob(db_pattern)
+        if db_files:
+            db_files.sort(key=os.path.getmtime, reverse=True)
+            for db_f in db_files[:5]:
+                cid = os.path.splitext(os.path.basename(db_f))[0]
+                tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+                if os.path.exists(tpath):
+                    return cid
+    except Exception:
+        pass
+
+    # 6. Fallback: newest modified transcript
     pattern = os.path.expanduser(r"~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl")
     files = glob.glob(pattern)
     if files:
@@ -210,31 +242,68 @@ def get_recent_projects_list(current_cid=None):
     """List recent open projects with conversation IDs and names for dropdown selector."""
     projects = []
     seen_convs = set()
+    order = []
     try:
         path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             order = json.loads(data.get("projectsConversationOrder", "[]"))
-            for cid in order[:10]:
-                if cid in seen_convs:
-                    continue
-                tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
-                if not os.path.exists(tpath):
-                    continue
-                seen_convs.add(cid)
-                ws = get_workspace_for_conversation(cid)
-                pname = os.path.basename(ws) if ws else ""
-                if not pname:
-                    pname = f"Диалог {cid[:6]}"
-                projects.append({
-                    "conversation_id": cid,
-                    "project_name": pname,
-                    "workspace_path": ws or "",
-                    "is_active": (cid == current_cid)
-                })
     except Exception:
         pass
+
+    try:
+        db_pattern = os.path.expanduser(r"~/.gemini/antigravity/conversations/*.db")
+        db_files = glob.glob(db_pattern)
+        if db_files:
+            db_files.sort(key=os.path.getmtime, reverse=True)
+            for db_f in db_files[:10]:
+                cid = os.path.splitext(os.path.basename(db_f))[0]
+                if cid not in order:
+                    order.append(cid)
+
+        if current_cid and current_cid not in order:
+            order.insert(0, current_cid)
+
+        raw_list = []
+        for cid in order[:15]:
+            if cid in seen_convs:
+                continue
+            tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+            if not os.path.exists(tpath):
+                continue
+            seen_convs.add(cid)
+            ws = get_workspace_for_conversation(cid)
+            pname = os.path.basename(ws) if ws else ""
+            if not pname:
+                pname = f"Диалог {cid[:6]}"
+            mtime = os.path.getmtime(tpath)
+            raw_list.append({
+                "conversation_id": cid,
+                "project_name": pname,
+                "workspace_path": ws or "",
+                "is_active": (cid == current_cid),
+                "mtime": mtime
+            })
+
+        # Disambiguate if multiple conversations share the same project name
+        name_counts = {}
+        for item in raw_list:
+            name_counts[item["project_name"]] = name_counts.get(item["project_name"], 0) + 1
+
+        for item in raw_list:
+            display_name = item["project_name"]
+            if name_counts.get(display_name, 0) > 1:
+                t_str = time.strftime("%H:%M", time.localtime(item["mtime"]))
+                display_name = f"{display_name} ({t_str})"
+            projects.append({
+                "conversation_id": item["conversation_id"],
+                "project_name": display_name,
+                "workspace_path": item["workspace_path"],
+                "is_active": item["is_active"]
+            })
+    except Exception as e:
+        print(f"[LimitlyAI] Error listing projects: {e}", file=sys.stderr)
     return projects
 
 def get_agent_memory_info(token=None, requested_cid=None):
@@ -586,6 +655,8 @@ class SidecarHandler(BaseHTTPRequestHandler):
                 ws_path = data.get("workspace_path")
                 new_lim = parse_token_limit(data.get("limit", 260000))
                 save_file = data.get("save_to_file", True)
+                conv_id = data.get("conversation_id")
+                token = data.get("token")
 
                 file_saved = False
                 if ws_path and os.path.isdir(ws_path) and save_file:
@@ -610,7 +681,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
                 settings["project_limits"] = p_limits
                 save_settings({"project_limits": p_limits})
 
-                updated_mem = get_agent_memory_info()
+                updated_mem = get_agent_memory_info(token=token, requested_cid=conv_id)
                 resp = json.dumps({
                     "status": "ok",
                     "limit": new_lim,
@@ -635,13 +706,17 @@ class SidecarHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         clean_path = self.path.split("?")[0]
+        print(f"[LimitlyAI GET] path={self.path}", file=sys.stderr)
+        sys.stderr.flush()
         
         # API Routes
         if clean_path == "/api/status":
             parsed_url = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_url.query)
             token = query_params.get("token", [""])[0]
-            requested_cid = query_params.get("conv_id", [""])[0]
+            requested_cid = query_params.get("conv_id", [""])[0] or query_params.get("conversationId", [""])[0]
+            if token and requested_cid:
+                _SESSION_TOKENS[token] = requested_cid
 
             antigravity_data = fetch_antigravity_quota()
             claude_data = get_claude_status()
@@ -693,6 +768,29 @@ class SidecarHandler(BaseHTTPRequestHandler):
         if clean_path == "/" or clean_path == "/index.html":
             file_path = STATIC_DIR / "index.html"
             content_type = "text/html; charset=utf-8"
+            if file_path.is_file():
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        html_text = f.read()
+                    parsed = urllib.parse.urlparse(self.path)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    tok = params.get("token", [""])[0]
+                    cid = params.get("conversationId", [""])[0] or params.get("conv_id", [""])[0]
+                    if tok and cid:
+                        _SESSION_TOKENS[tok] = cid
+                    init_data = json.dumps({"token": tok, "conversationId": cid})
+                    injection = f'<script>window.__LIMITLYAI_INIT__ = {init_data};</script></head>'
+                    html_text = html_text.replace("</head>", injection)
+                    content = html_text.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                except Exception as e:
+                    self.send_error(500, f"Error reading file: {e}")
+                    return
         elif clean_path == "/style.css":
             file_path = STATIC_DIR / "style.css"
             content_type = "text/css; charset=utf-8"

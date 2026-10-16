@@ -1,7 +1,9 @@
 // LimitlyAI Sidecar Web UI Application
 
 const urlParams = new URLSearchParams(window.location.search);
-const pageToken = urlParams.get("token") || "";
+const initConfig = window.__LIMITLYAI_INIT__ || {};
+const pageToken = urlParams.get("token") || initConfig.token || "";
+const pageConvId = urlParams.get("conversationId") || urlParams.get("conv_id") || initConfig.conversationId || "";
 
 let appState = {
   filter: localStorage.getItem("limitlyai_filter") || "all",
@@ -525,13 +527,16 @@ async function changeProjectMemoryLimit(newLimit, encodedWsPath) {
   if (!limitVal || isNaN(limitVal)) return;
 
   try {
+    const curCid = appState.selectedConvId || pageConvId;
     const resp = await fetch("/api/project_limit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         workspace_path: wsPath,
         limit: limitVal,
-        save_to_file: true
+        save_to_file: true,
+        conversation_id: curCid,
+        token: pageToken
       })
     });
     if (resp.ok) {
@@ -582,10 +587,10 @@ function renderMemoryCard(mem) {
   let badgeColor = "color:var(--text-dim);";
   if (usedPct >= 85) {
     fillClass = "fill-crit";
-    badgeColor = "color:#ffffff;font-weight:700;";
+    badgeColor = "#ffffff";
   } else if (usedPct >= 70) {
     fillClass = "fill-warn";
-    badgeColor = "color:#e4e4e7;font-weight:600;";
+    badgeColor = "#e4e4e7";
   }
 
   let adviceHtml = "";
@@ -629,15 +634,17 @@ function renderMemoryCard(mem) {
   const standardLimits = [128000, 160000, 200000, 260000, 500000, 1000000];
   const isCustomLimit = !standardLimits.includes(contextLimit);
 
+  const isAuto = !appState.selectedConvId;
   let projectsSelectHtml = `<span class="memory-project-name">${projectName}</span>`;
   if (recentProjects.length > 1) {
     const opts = recentProjects.map(p => {
+      const isSelected = (!isAuto && p.conversation_id === appState.selectedConvId);
       const isCur = (p.conversation_id === mem.conversation_id);
-      return `<option value="${p.conversation_id}" ${isCur ? 'selected' : ''}>${p.project_name || 'Проект'}</option>`;
+      return `<option value="${p.conversation_id}" ${isSelected ? 'selected' : ''}>${p.project_name || 'Проект'}${isCur && !isAuto ? ' ✓' : ''}</option>`;
     }).join("");
     projectsSelectHtml = `
       <select class="proj-select" title="Переключить проект или диалог" onchange="switchProjectConversation(this.value)">
-        <option value="" ${!appState.selectedConvId ? 'selected' : ''}>Авто (${projectName})</option>
+        <option value="" ${isAuto ? 'selected' : ''}>⚡ Авто (${projectName})</option>
         ${opts}
       </select>
     `;
@@ -1106,7 +1113,8 @@ async function fetchStatus() {
     let url = "/api/status";
     const q = [];
     if (pageToken) q.push("token=" + encodeURIComponent(pageToken));
-    if (appState.selectedConvId) q.push("conv_id=" + encodeURIComponent(appState.selectedConvId));
+    const targetCid = appState.selectedConvId || pageConvId;
+    if (targetCid) q.push("conv_id=" + encodeURIComponent(targetCid));
     if (q.length > 0) url += "?" + q.join("&");
 
     const res = await fetch(url, { cache: "no-store" });
