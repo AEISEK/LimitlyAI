@@ -654,13 +654,13 @@ function renderMemoryCard(mem) {
           <div class="memory-progress-labels">
             <span class="memory-tokens">${fmtTotal} / ${fmtLimit} токенов</span>
             <div class="memory-labels-right">
-              ${isCompacted ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">Авто-сжатие</span>` : ''}
+              ${isCompacted ? `<span class="badge-compact" title="Сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">Сжатие</span>` : ''}
               <span class="memory-pct">${usedPct}%</span>
             </div>
           </div>
         </div>
 
-        <!-- Stats Tiles (Кэш, Новые, Авто-сжатие, Шаг) -->
+        <!-- Stats Tiles (Кэш, Новые, Сжатие, Шаг) -->
         <div class="stat-grid ${isCompacted ? 'stat-grid-4' : ''}">
           <div class="stat-tile" title="Кэшированные токены предыдущего контекста диалога: ${cacheRead.toLocaleString()}">
             <span class="stat-val">${fmtCache}</span>
@@ -671,9 +671,9 @@ function renderMemoryCard(mem) {
             <span class="stat-lbl">Новые</span>
           </div>
           ${isCompacted ? `
-          <div class="stat-tile" title="Авто-сжатие контекста: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
+          <div class="stat-tile" title="Сжатие контекста: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
             <span class="stat-val">${compactCount}</span>
-            <span class="stat-lbl">Авто-сжатие</span>
+            <span class="stat-lbl">Сжатие</span>
           </div>` : ''}
           <div class="stat-tile" title="Номер последнего шага в диалоге: #${stepIndex}">
             <span class="stat-val">#${stepIndex}</span>
