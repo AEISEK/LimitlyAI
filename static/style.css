@@ -637,7 +637,7 @@ body {
 }
 
 .stat-val-compact {
-  color: #38bdf8;
+  color: #fff;
 }
 
 .stat-lbl {
@@ -649,14 +649,13 @@ body {
 .badge-compact {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
   font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
+  font-weight: 500;
+  padding: 1px 7px;
   border-radius: 9999px;
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: #d4d4d8;
+  border: 1px solid var(--border-subtle);
   font-feature-settings: "tnum";
 }
 

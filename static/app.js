@@ -654,7 +654,7 @@ function renderMemoryCard(mem) {
           <div class="memory-progress-labels">
             <span class="memory-tokens">${fmtTotal} / ${fmtLimit} токенов</span>
             <div class="memory-labels-right">
-              ${isCompacted ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">⚡ Авто-сжатие</span>` : ''}
+              ${isCompacted ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">Авто-сжатие</span>` : ''}
               <span class="memory-pct">${usedPct}%</span>
             </div>
           </div>
@@ -672,7 +672,7 @@ function renderMemoryCard(mem) {
           </div>
           ${isCompacted ? `
           <div class="stat-tile" title="Авто-сжатие контекста: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
-            <span class="stat-val stat-val-compact">${compactCount}</span>
+            <span class="stat-val">${compactCount}</span>
             <span class="stat-lbl">Авто-сжатие</span>
           </div>` : ''}
           <div class="stat-tile" title="Номер последнего шага в диалоге: #${stepIndex}">
