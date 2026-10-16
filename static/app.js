@@ -654,7 +654,6 @@ function renderMemoryCard(mem) {
           <div class="memory-progress-labels">
             <span class="memory-tokens">${fmtTotal} / ${fmtLimit} токенов</span>
             <div class="memory-labels-right">
-              ${isCompacted ? `<span class="badge-compact" title="Сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">Сжатие</span>` : ''}
               <span class="memory-pct">${usedPct}%</span>
             </div>
           </div>
