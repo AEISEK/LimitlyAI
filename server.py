@@ -34,7 +34,7 @@ DEFAULT_SETTINGS = {
     "filter": "all",
     "auto_refresh": True,
     "refresh_interval": 30,
-    "default_memory_limit": 260000,
+    "default_memory_limit": 1048576,
     "project_limits": {},
     "history": []
 }
@@ -43,7 +43,7 @@ def load_settings():
     """Load persistent settings from disk."""
     if SETTINGS_FILE.is_file():
         try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
                 merged = dict(DEFAULT_SETTINGS)
                 merged.update(data)
@@ -101,18 +101,21 @@ def record_quota_history(ag_data):
     except Exception:
         pass
 
-def parse_token_limit(val, default=260000):
-    """Parse integer or shorthand string ('200k', '1M', 180000) into integer tokens."""
+def parse_token_limit(val, default=1048576):
+    """Parse integer or shorthand string ('200k', '1M', 180000, 1048576) into integer tokens."""
     if not val:
         return default
     if isinstance(val, (int, float)):
         return int(val)
     val_str = str(val).strip().lower()
     try:
+        if val_str == "1m":
+            return 1048576
         if val_str.endswith("m"):
-            return int(float(val_str[:-1]) * 1000000)
+            return int(float(val_str[:-1]) * 1048576)
         if val_str.endswith("k"):
-            return int(float(val_str[:-1]) * 1000)
+            num = float(val_str[:-1])
+            return 1048576 if num == 1024 else int(num * 1000)
         return int(float(val_str))
     except (ValueError, TypeError):
         return default
@@ -160,7 +163,7 @@ def get_project_memory_config(workspace_path):
     for c in candidates:
         if os.path.isfile(c):
             try:
-                with open(c, "r", encoding="utf-8") as f:
+                with open(c, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
                     lim = data.get("memory_limit") or data.get("memory_limit_tokens") or data.get("limit")
                     if lim:
@@ -365,8 +368,8 @@ def get_agent_memory_info(token=None, requested_cid=None):
 
         # 3. Default fallback
         if not proj_limit:
-            proj_limit = parse_token_limit(settings.get("default_memory_limit", 260000))
-            cfg_source = "стандарт (260k)"
+            proj_limit = parse_token_limit(settings.get("default_memory_limit", 1048576))
+            cfg_source = "по умолчанию (1M)"
 
         context_limit = proj_limit
         total_context = cache_read + input_tok
@@ -653,7 +656,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
                 body = self.rfile.read(content_len) if content_len > 0 else b"{}"
                 data = json.loads(body.decode("utf-8"))
                 ws_path = data.get("workspace_path")
-                new_lim = parse_token_limit(data.get("limit", 260000))
+                new_lim = parse_token_limit(data.get("limit", 1048576))
                 save_file = data.get("save_to_file", True)
                 conv_id = data.get("conversation_id")
                 token = data.get("token")

@@ -569,19 +569,17 @@ function renderMemoryCard(mem) {
   const isMemoryCollapsed = !!(appState.collapsedSections && appState.collapsedSections["memory"]);
   const usedPct = mem.used_percent || 0;
   const totalContext = mem.total_context_tokens || 0;
-  const contextLimit = mem.context_limit_tokens || 260000;
+  const contextLimit = mem.context_limit_tokens || 1048576;
   const cacheRead = mem.cache_read_tokens || 0;
   const inputTokens = mem.input_tokens || 0;
   const stepIndex = mem.step_index || 0;
   const projectName = mem.project_name || "Проект";
   const workspacePath = mem.workspace_path || "";
-  const limitSource = mem.limit_source || "по умолчанию";
-  const recentProjects = mem.recent_projects || [];
 
-  const fmtTotal = totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext;
-  const fmtLimit = Math.round(contextLimit / 1000) + "k";
-  const fmtCache = cacheRead >= 1000 ? Math.round(cacheRead / 1000) + "k" : cacheRead;
-  const fmtInput = inputTokens >= 1000 ? (inputTokens >= 10000 ? Math.round(inputTokens / 1000) + "k" : (inputTokens / 1000).toFixed(1) + "k") : inputTokens;
+  const fmtLimit = (contextLimit >= 1048576) ? (contextLimit === 1048576 ? "1M" : `${(contextLimit / 1048576).toFixed(1)}M`) : (contextLimit >= 1000000 ? `${(contextLimit / 1000000).toFixed(1)}M` : `${Math.round(contextLimit / 1000)}k`);
+  const fmtTotal = (totalContext >= 1048576) ? `${(totalContext / 1048576).toFixed(2)}M` : (totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext);
+  const fmtCache = (cacheRead >= 1048576) ? `${(cacheRead / 1048576).toFixed(2)}M` : (cacheRead >= 1000 ? Math.round(cacheRead / 1000) + "k" : cacheRead);
+  const fmtInput = (inputTokens >= 1048576) ? `${(inputTokens / 1048576).toFixed(2)}M` : (inputTokens >= 1000 ? (inputTokens >= 10000 ? Math.round(inputTokens / 1000) + "k" : (inputTokens / 1000).toFixed(1) + "k") : inputTokens);
 
   let fillClass = "";
   let badgeColor = "color:var(--text-dim);";
@@ -628,25 +626,6 @@ function renderMemoryCard(mem) {
     adviceHtml = "";
   }
 
-  const standardLimits = [128000, 160000, 200000, 260000, 500000, 1000000];
-  const isCustomLimit = !standardLimits.includes(contextLimit);
-
-  const isAuto = !appState.selectedConvId;
-  let projectsSelectHtml = `<span class="memory-project-name">${projectName}</span>`;
-  if (recentProjects.length > 1) {
-    const opts = recentProjects.map(p => {
-      const isSelected = (!isAuto && p.conversation_id === appState.selectedConvId);
-      const isCur = (p.conversation_id === mem.conversation_id);
-      return `<option value="${p.conversation_id}" ${isSelected ? 'selected' : ''}>${p.project_name || 'Проект'}${isCur && !isAuto ? ' ✓' : ''}</option>`;
-    }).join("");
-    projectsSelectHtml = `
-      <select class="proj-select" title="Переключить проект или диалог" onchange="switchProjectConversation(this.value)">
-        <option value="" ${isAuto ? 'selected' : ''}>⚡ Авто (${projectName})</option>
-        ${opts}
-      </select>
-    `;
-  }
-
   return `
     <!-- Карточка памяти агента (Контекстное окно) -->
     <div class="analytics-card collapsible-card ${isMemoryCollapsed ? 'card-collapsed' : ''}" id="sec-memory" onclick="toggleSection('memory', event)" title="${isMemoryCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
@@ -665,29 +644,6 @@ function renderMemoryCard(mem) {
       </div>
 
       <div class="collapsible-body">
-        <!-- Project & Limit Selector Bar -->
-        <div class="memory-project-bar">
-          <div class="memory-project-info" title="Каталог проекта: ${workspacePath}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            ${projectsSelectHtml}
-            <span class="memory-source-pill" title="Источник лимита: ${limitSource}">${limitSource}</span>
-          </div>
-          <div class="memory-limit-selector" onclick="event.stopPropagation()">
-            <label for="select-proj-limit">Лимит:</label>
-            <select id="select-proj-limit" class="proj-limit-select" title="Изменить лимит проекта (сохраняется в .limitlyai.json)" onchange="changeProjectMemoryLimit(this.value, '${encodeURIComponent(workspacePath)}')">
-              <option value="128000" ${contextLimit === 128000 ? 'selected' : ''}>128k</option>
-              <option value="160000" ${contextLimit === 160000 ? 'selected' : ''}>160k</option>
-              <option value="200000" ${contextLimit === 200000 ? 'selected' : ''}>200k (Claude)</option>
-              <option value="260000" ${contextLimit === 260000 ? 'selected' : ''}>260k (Gemini)</option>
-              <option value="500000" ${contextLimit === 500000 ? 'selected' : ''}>500k</option>
-              <option value="1000000" ${contextLimit === 1000000 ? 'selected' : ''}>1M (Pro)</option>
-              ${isCustomLimit ? `<option value="${contextLimit}" selected>${fmtLimit}</option>` : ''}
-            </select>
-          </div>
-        </div>
-
         <!-- Progress Bar -->
         <div class="memory-progress-wrap" title="Заполнение контекстного окна: ${totalContext.toLocaleString()} из ${contextLimit.toLocaleString()} токенов (${usedPct}%)">
           <div class="memory-progress-bar">
