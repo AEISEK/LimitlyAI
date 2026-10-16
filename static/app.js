@@ -629,11 +629,6 @@ function renderMemoryCard(mem) {
   } else {
     adviceHtml = "";
   }
-
-  const compactHeaderBadge = isCompacted
-    ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">⚡ ${compactCount}</span>`
-    : "";
-
   return `
     <!-- Карточка памяти агента (Контекстное окно) -->
     <div class="analytics-card collapsible-card ${isMemoryCollapsed ? 'card-collapsed' : ''}" id="sec-memory" onclick="toggleSection('memory', event)" title="${isMemoryCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
@@ -646,9 +641,7 @@ function renderMemoryCard(mem) {
           Память агента
         </span>
         <div class="header-right">
-          ${compactHeaderBadge}
           <span class="collapsed-preview">${projectName} · ${usedPct}% · ${fmtTotal}/${fmtLimit}</span>
-          <span class="header-badge expanded-badge" style="font-size:10px;${badgeColor}">${projectName} · ${fmtTotal}/${fmtLimit}</span>
         </div>
       </div>
 
