@@ -468,6 +468,11 @@ def start_parent_watcher():
                 # Parent exited, cleanly exit
                 os._exit(0)
 
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+    except Exception:
+        pass
+
 def cleanup_orphaned_servers():
     """Kill any previous orphaned server.py processes on startup to prevent duplicates."""
     try:
