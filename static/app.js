@@ -3,7 +3,10 @@
 let appState = {
   filter: localStorage.getItem("limitlyai_filter") || "all",
   viewMode: localStorage.getItem("limitlyai_view_mode") || "compact",
-  refreshInterval: parseInt(localStorage.getItem("limitlyai_refresh_interval") || "30", 10),
+  refreshInterval: (() => {
+    const v = parseInt(localStorage.getItem("limitlyai_refresh_interval") || "30", 10);
+    return [10, 15, 30, 60].includes(v) ? v : 15;
+  })(),
   autoRefreshEnabled: localStorage.getItem("limitlyai_auto_refresh") !== "false",
   collapsedSections: (() => {
     try {
@@ -138,7 +141,9 @@ function syncUI() {
   }
 
   if (dom.intervalSelect) {
-    dom.intervalSelect.value = String(appState.refreshInterval || 30);
+    const valid = ["10", "15", "30", "60"];
+    const cur = String(appState.refreshInterval || 30);
+    dom.intervalSelect.value = valid.includes(cur) ? cur : "15";
   }
 }
 
@@ -239,7 +244,9 @@ function applyServerSettings(settings) {
     localStorage.setItem("limitlyai_auto_refresh", String(settings.auto_refresh));
   }
   if (settings.refresh_interval) {
-    appState.refreshInterval = parseInt(settings.refresh_interval, 10) || 30;
+    let intVal = parseInt(settings.refresh_interval, 10) || 30;
+    if (![10, 15, 30, 60].includes(intVal)) intVal = 15;
+    appState.refreshInterval = intVal;
     localStorage.setItem("limitlyai_refresh_interval", String(appState.refreshInterval));
   }
   if (settings.collapsed_sections && typeof settings.collapsed_sections === "object") {
