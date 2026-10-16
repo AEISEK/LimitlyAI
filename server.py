@@ -29,6 +29,18 @@ SETTINGS_FILE = CONFIG_DIR / "limitlyai_settings.json"
 # In-memory mapping of webview session tokens to conversation IDs
 _SESSION_TOKENS = {}
 
+# Performance caches
+_SETTINGS_CACHE = {"data": None, "mtime": 0.0}
+_WORKSPACE_CACHE = {} # conv_id -> workspace_path
+_PROJECTS_CACHE = {"raw_list": [], "timestamp": 0.0}
+_TRANSCRIPT_CACHE = {} # conv_id -> {"mtime": 0.0, "fsize": 0, "last_step": dict}
+_PROJ_CONFIG_CACHE = {} # workspace_path -> (limit, source, mtime, check_time)
+
+# Pre-initialized SSL Context (zero allocation per request)
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+
 DEFAULT_SETTINGS = {
     "view_mode": "compact",
     "filter": "all",
@@ -40,20 +52,26 @@ DEFAULT_SETTINGS = {
 }
 
 def load_settings():
-    """Load persistent settings from disk."""
-    if SETTINGS_FILE.is_file():
-        try:
+    """Load persistent settings from disk with mtime validation cache."""
+    global _SETTINGS_CACHE
+    try:
+        if SETTINGS_FILE.is_file():
+            cur_mtime = SETTINGS_FILE.stat().st_mtime
+            if _SETTINGS_CACHE["data"] is not None and _SETTINGS_CACHE["mtime"] == cur_mtime:
+                return dict(_SETTINGS_CACHE["data"])
             with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
                 merged = dict(DEFAULT_SETTINGS)
                 merged.update(data)
-                return merged
-        except Exception as e:
-            print(f"[LimitlyAI] Error loading settings: {e}", file=sys.stderr)
+                _SETTINGS_CACHE = {"data": merged, "mtime": cur_mtime}
+                return dict(merged)
+    except Exception as e:
+        print(f"[LimitlyAI] Error loading settings: {e}", file=sys.stderr)
     return dict(DEFAULT_SETTINGS)
 
 def save_settings(new_settings):
-    """Save persistent settings to disk atomically."""
+    """Save persistent settings to disk atomically and update cache."""
+    global _SETTINGS_CACHE
     current = load_settings()
     for k, v in new_settings.items():
         current[k] = v
@@ -63,6 +81,11 @@ def save_settings(new_settings):
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(current, f, indent=2, ensure_ascii=False)
         temp_file.replace(SETTINGS_FILE)
+        try:
+            cur_mtime = SETTINGS_FILE.stat().st_mtime
+        except Exception:
+            cur_mtime = time.time()
+        _SETTINGS_CACHE = {"data": current, "mtime": cur_mtime}
     except Exception as e:
         print(f"[LimitlyAI] Error saving settings: {e}", file=sys.stderr)
     return current
@@ -121,11 +144,15 @@ def parse_token_limit(val, default=1048576):
         return default
 
 def get_workspace_for_conversation(conv_id):
-    """Extract project root folder from Antigravity conversation db trajectory metadata."""
+    """Extract project root folder from Antigravity conversation db trajectory metadata (cached)."""
     if not conv_id:
         return None
+    if conv_id in _WORKSPACE_CACHE:
+        return _WORKSPACE_CACHE[conv_id]
+
     db_path = os.path.expanduser(f"~/.gemini/antigravity/conversations/{conv_id}.db")
     if not os.path.exists(db_path):
+        _WORKSPACE_CACHE[conv_id] = None
         return None
     try:
         conn = sqlite3.connect(db_path, timeout=1.0)
@@ -139,22 +166,31 @@ def get_workspace_for_conversation(conv_id):
             for m in matches:
                 path = os.path.normpath(urllib.parse.unquote(m))
                 if os.path.isdir(path):
+                    _WORKSPACE_CACHE[conv_id] = path
                     return path
                 # Also check under Documents/antigravity/<basename>
                 bname = os.path.basename(path)
                 alt = os.path.normpath(os.path.join(os.path.expanduser("~/Documents/antigravity"), bname))
                 if os.path.isdir(alt):
+                    _WORKSPACE_CACHE[conv_id] = alt
                     return alt
                 # Still return the path so basename can be used
+                _WORKSPACE_CACHE[conv_id] = path
                 return path
     except Exception:
         pass
+    _WORKSPACE_CACHE[conv_id] = None
     return None
 
 def get_project_memory_config(workspace_path):
-    """Read memory_limit from .limitlyai.json or limitlyai.json in the project root."""
+    """Read memory_limit from .limitlyai.json or limitlyai.json in the project root (cached)."""
     if not workspace_path or not os.path.isdir(workspace_path):
         return None, None
+    now = time.time()
+    cached = _PROJ_CONFIG_CACHE.get(workspace_path)
+    if cached and (now - cached.get("check_time", 0) < 5.0):
+        return cached["limit"], cached["source"]
+
     candidates = [
         os.path.join(workspace_path, ".limitlyai.json"),
         os.path.join(workspace_path, "limitlyai.json"),
@@ -163,13 +199,27 @@ def get_project_memory_config(workspace_path):
     for c in candidates:
         if os.path.isfile(c):
             try:
+                cmtime = os.path.getmtime(c)
+                if cached and cached.get("mtime") == cmtime and cached.get("path") == c:
+                    _PROJ_CONFIG_CACHE[workspace_path]["check_time"] = now
+                    return cached["limit"], cached["source"]
                 with open(c, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
                     lim = data.get("memory_limit") or data.get("memory_limit_tokens") or data.get("limit")
                     if lim:
-                        return parse_token_limit(lim), os.path.basename(c)
+                        parsed = parse_token_limit(lim)
+                        bname = os.path.basename(c)
+                        _PROJ_CONFIG_CACHE[workspace_path] = {
+                            "limit": parsed,
+                            "source": bname,
+                            "path": c,
+                            "mtime": cmtime,
+                            "check_time": now
+                        }
+                        return parsed, bname
             except Exception:
                 pass
+    _PROJ_CONFIG_CACHE[workspace_path] = {"limit": None, "source": None, "path": None, "mtime": 0, "check_time": now}
     return None, None
 
 def resolve_conversation_id(token=None, requested_cid=None):
@@ -242,7 +292,20 @@ def resolve_conversation_id(token=None, requested_cid=None):
     return None
 
 def get_recent_projects_list(current_cid=None):
-    """List recent open projects with conversation IDs and names for dropdown selector."""
+    """List recent open projects with conversation IDs and names for dropdown selector (cached)."""
+    global _PROJECTS_CACHE
+    now = time.time()
+    if (now - _PROJECTS_CACHE.get("timestamp", 0) < 5.0) and _PROJECTS_CACHE.get("raw_list"):
+        return [
+            {
+                "conversation_id": item["conversation_id"],
+                "project_name": item["project_name"],
+                "workspace_path": item["workspace_path"],
+                "is_active": (item["conversation_id"] == current_cid)
+            }
+            for item in _PROJECTS_CACHE["raw_list"]
+        ]
+
     projects = []
     seen_convs = set()
     order = []
@@ -285,7 +348,6 @@ def get_recent_projects_list(current_cid=None):
                 "conversation_id": cid,
                 "project_name": pname,
                 "workspace_path": ws or "",
-                "is_active": (cid == current_cid),
                 "mtime": mtime
             })
 
@@ -294,17 +356,25 @@ def get_recent_projects_list(current_cid=None):
         for item in raw_list:
             name_counts[item["project_name"]] = name_counts.get(item["project_name"], 0) + 1
 
+        cached_templates = []
         for item in raw_list:
             display_name = item["project_name"]
             if name_counts.get(display_name, 0) > 1:
                 t_str = time.strftime("%H:%M", time.localtime(item["mtime"]))
                 display_name = f"{display_name} ({t_str})"
+            cached_templates.append({
+                "conversation_id": item["conversation_id"],
+                "project_name": display_name,
+                "workspace_path": item["workspace_path"]
+            })
             projects.append({
                 "conversation_id": item["conversation_id"],
                 "project_name": display_name,
                 "workspace_path": item["workspace_path"],
-                "is_active": item["is_active"]
+                "is_active": (item["conversation_id"] == current_cid)
             })
+        _PROJECTS_CACHE["raw_list"] = cached_templates
+        _PROJECTS_CACHE["timestamp"] = now
     except Exception as e:
         print(f"[LimitlyAI] Error listing projects: {e}", file=sys.stderr)
     return projects
@@ -320,26 +390,34 @@ def get_agent_memory_info(token=None, requested_cid=None):
         if not os.path.exists(tpath):
             return {"available": False, "reason": f"Транскрипт диалога {conv_id} не найден"}
 
-        fsize = os.path.getsize(tpath)
-        read_bytes = min(fsize, 65536)
-        with open(tpath, "rb") as f:
-            if fsize > read_bytes:
-                f.seek(fsize - read_bytes)
-            chunk = f.read().decode("utf-8", errors="ignore")
+        stat_info = os.stat(tpath)
+        fsize = stat_info.st_size
+        fmtime = stat_info.st_mtime
 
-        lines = chunk.strip().split("\n")
-        last_step = None
-        for line in reversed(lines):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                if "input_tokens" in data and "cache_read_tokens" in data:
-                    last_step = data
-                    break
-            except Exception:
-                continue
+        cached_trans = _TRANSCRIPT_CACHE.get(conv_id)
+        if cached_trans and cached_trans.get("fsize") == fsize and cached_trans.get("mtime") == fmtime:
+            last_step = cached_trans["last_step"]
+        else:
+            read_bytes = min(fsize, 65536)
+            with open(tpath, "rb") as f:
+                if fsize > read_bytes:
+                    f.seek(fsize - read_bytes)
+                chunk = f.read().decode("utf-8", errors="ignore")
+
+            lines = chunk.strip().split("\n")
+            last_step = None
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    if "input_tokens" in data and "cache_read_tokens" in data:
+                        last_step = data
+                        break
+                except Exception:
+                    continue
+            _TRANSCRIPT_CACHE[conv_id] = {"fsize": fsize, "mtime": fmtime, "last_step": last_step}
 
         if not last_step:
             return {"available": False, "reason": "Нет данных о токенах в активном диалоге"}
@@ -421,8 +499,8 @@ def discover_language_server(force=False):
     """Locate the Antigravity language server PID, listening port, and CSRF token."""
     global _ls_cache
     
-    # Check cache first if tested within 15 seconds (unless force=True)
-    if not force and _ls_cache["port"] and _ls_cache["csrf"] and (time.time() - _ls_cache["last_checked"] < 15):
+    # Check cache first (retained indefinitely until connection failure)
+    if not force and _ls_cache["port"] and _ls_cache["csrf"]:
         return _ls_cache["port"], _ls_cache["csrf"]
 
     try:
@@ -462,10 +540,6 @@ def discover_language_server(force=False):
                 except (ValueError, IndexError):
                     continue
 
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
         # Test candidate ports for HTTPS RetrieveUserQuotaSummary
         for port in sorted(set(candidate_ports)):
             url = f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
@@ -478,7 +552,7 @@ def discover_language_server(force=False):
                 }
             )
             try:
-                with urllib.request.urlopen(req, context=ctx, timeout=1.2) as resp:
+                with urllib.request.urlopen(req, context=_SSL_CTX, timeout=1.2) as resp:
                     if resp.status == 200:
                         _ls_cache["port"] = port
                         _ls_cache["csrf"] = csrf
@@ -497,10 +571,6 @@ def discover_language_server(force=False):
 def fetch_antigravity_quota():
     """Fetch structured quota summary from the local Antigravity Language Server."""
     port, csrf = _ls_cache.get("port"), _ls_cache.get("csrf")
-    
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
 
     # Attempt cached port first
     if port and csrf:
@@ -514,7 +584,7 @@ def fetch_antigravity_quota():
                     "x-codeium-csrf-token": csrf
                 }
             )
-            with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
+            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=2.5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 _ls_cache["last_checked"] = time.time()
                 return parse_antigravity_response(data)
@@ -539,7 +609,7 @@ def fetch_antigravity_quota():
                 "x-codeium-csrf-token": csrf
             }
         )
-        with urllib.request.urlopen(req, context=ctx, timeout=3.0) as resp:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=3.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             _ls_cache["last_checked"] = time.time()
             return parse_antigravity_response(data)
@@ -709,8 +779,6 @@ class SidecarHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         clean_path = self.path.split("?")[0]
-        print(f"[LimitlyAI GET] path={self.path}", file=sys.stderr)
-        sys.stderr.flush()
         
         # API Routes
         if clean_path == "/api/status":

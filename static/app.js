@@ -24,7 +24,8 @@ let appState = {
   selectedConvId: "",
   autoRefreshTimer: null,
   lastFetchTime: 0,
-  settingsLoaded: false
+  settingsLoaded: false,
+  lastRenderSignature: ""
 };
 
 const dom = {
@@ -986,7 +987,7 @@ function renderCards(groups) {
 }
 
 // Render data
-function render() {
+function render(force = false) {
   updateViewSwitcherUI();
 
   if (!appState.data || !appState.data.antigravity) {
@@ -997,6 +998,7 @@ function render() {
           <button class="btn-action" onclick="fetchStatus()">Повторить попытку</button>
         </div>`;
     }
+    appState.lastRenderSignature = "";
     return;
   }
 
@@ -1012,11 +1014,37 @@ function render() {
           <button class="btn-action" onclick="fetchStatus()">Переподключиться</button>
         </div>`;
     }
+    appState.lastRenderSignature = "";
     return;
   }
 
   if (dom.statusBadge) dom.statusBadge.className = "badge badge-online";
   if (dom.statusText) dom.statusText.textContent = "Онлайн";
+
+  const mem = appState.data.agent_memory;
+  const signature = JSON.stringify([
+    ag.online,
+    ag.groups,
+    mem ? [
+      mem.available,
+      mem.step_index,
+      mem.total_context_tokens,
+      mem.context_limit_tokens,
+      mem.project_name,
+      mem.conversation_id,
+      (mem.recent_projects || []).length
+    ] : null,
+    appState.viewMode,
+    appState.filter,
+    appState.selectedConvId,
+    appState.collapsedSections
+  ]);
+
+  if (!force && signature === appState.lastRenderSignature) {
+    if (dom.lastSyncTime) dom.lastSyncTime.textContent = new Date().toLocaleTimeString();
+    return;
+  }
+  appState.lastRenderSignature = signature;
 
   const groups = ag.groups || [];
   let html = appState.viewMode === "compact" ? renderCompact(groups) : renderCards(groups);
@@ -1165,14 +1193,14 @@ window.addEventListener("focus", () => {
 if (dom.btnModeCompact) {
   dom.btnModeCompact.addEventListener("click", () => {
     persistSetting({ view_mode: "compact" });
-    render();
+    render(true);
   });
 }
 
 if (dom.btnModeCards) {
   dom.btnModeCards.addEventListener("click", () => {
     persistSetting({ view_mode: "cards" });
-    render();
+    render(true);
   });
 }
 
@@ -1180,7 +1208,7 @@ dom.filterTabs.forEach(tab => {
   tab.addEventListener("click", () => {
     const val = tab.getAttribute("data-filter");
     persistSetting({ filter: val });
-    render();
+    render(true);
   });
 });
 
