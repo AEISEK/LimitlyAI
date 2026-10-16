@@ -1,5 +1,8 @@
 // LimitlyAI Sidecar Web UI Application
 
+const urlParams = new URLSearchParams(window.location.search);
+const pageToken = urlParams.get("token") || "";
+
 let appState = {
   filter: localStorage.getItem("limitlyai_filter") || "all",
   viewMode: localStorage.getItem("limitlyai_view_mode") || "compact",
@@ -16,6 +19,7 @@ let appState = {
     }
   })(),
   data: null,
+  selectedConvId: "",
   autoRefreshTimer: null,
   lastFetchTime: 0,
   settingsLoaded: false
@@ -546,6 +550,13 @@ async function changeProjectMemoryLimit(newLimit, encodedWsPath) {
 }
 window.changeProjectMemoryLimit = changeProjectMemoryLimit;
 
+// Switch active project/conversation to display
+function switchProjectConversation(cid) {
+  appState.selectedConvId = cid;
+  fetchStatus();
+}
+window.switchProjectConversation = switchProjectConversation;
+
 // Render Agent Context Window Memory Card (Память агента)
 function renderMemoryCard(mem) {
   if (!mem || !mem.available) return "";
@@ -560,6 +571,7 @@ function renderMemoryCard(mem) {
   const projectName = mem.project_name || "Проект";
   const workspacePath = mem.workspace_path || "";
   const limitSource = mem.limit_source || "по умолчанию";
+  const recentProjects = mem.recent_projects || [];
 
   const fmtTotal = totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext;
   const fmtLimit = Math.round(contextLimit / 1000) + "k";
@@ -617,6 +629,20 @@ function renderMemoryCard(mem) {
   const standardLimits = [128000, 160000, 200000, 260000, 500000, 1000000];
   const isCustomLimit = !standardLimits.includes(contextLimit);
 
+  let projectsSelectHtml = `<span class="memory-project-name">${projectName}</span>`;
+  if (recentProjects.length > 1) {
+    const opts = recentProjects.map(p => {
+      const isCur = (p.conversation_id === mem.conversation_id);
+      return `<option value="${p.conversation_id}" ${isCur ? 'selected' : ''}>${p.project_name || 'Проект'}</option>`;
+    }).join("");
+    projectsSelectHtml = `
+      <select class="proj-select" title="Переключить проект или диалог" onchange="switchProjectConversation(this.value)">
+        <option value="" ${!appState.selectedConvId ? 'selected' : ''}>Авто (${projectName})</option>
+        ${opts}
+      </select>
+    `;
+  }
+
   return `
     <!-- Карточка памяти агента (Контекстное окно) -->
     <div class="analytics-card collapsible-card ${isMemoryCollapsed ? 'card-collapsed' : ''}" id="sec-memory" onclick="toggleSection('memory', event)" title="${isMemoryCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
@@ -641,7 +667,7 @@ function renderMemoryCard(mem) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
-            <span class="memory-project-name">${projectName}</span>
+            ${projectsSelectHtml}
             <span class="memory-source-pill" title="Источник лимита: ${limitSource}">${limitSource}</span>
           </div>
           <div class="memory-limit-selector" onclick="event.stopPropagation()">
@@ -1077,7 +1103,13 @@ function tickCountdowns() {
 async function fetchStatus() {
   if (dom.btnRefresh) dom.btnRefresh.classList.add("spinning");
   try {
-    const res = await fetch("/api/status", { cache: "no-store" });
+    let url = "/api/status";
+    const q = [];
+    if (pageToken) q.push("token=" + encodeURIComponent(pageToken));
+    if (appState.selectedConvId) q.push("conv_id=" + encodeURIComponent(appState.selectedConvId));
+    if (q.length > 0) url += "?" + q.join("&");
+
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -1200,4 +1232,10 @@ setInterval(tickCountdowns, 1000);
 syncUI();
 fetchStatus();
 setupAutoRefresh();
+
+// Auto-refresh when user switches back to this tab/window
+window.addEventListener("focus", () => fetchStatus());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) fetchStatus();
+});
 

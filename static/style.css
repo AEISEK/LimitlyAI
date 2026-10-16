@@ -851,6 +851,35 @@ body {
   font-size: 11px;
 }
 
+.proj-select {
+  background: transparent;
+  color: #e4e4e7;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 1px 3px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  max-width: 140px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.proj-select:hover {
+  background: var(--bg-card);
+  border-color: #3f3f46;
+}
+
+.proj-select option {
+  background: var(--bg-card);
+  color: #fff;
+  font-weight: normal;
+}
+
 .memory-source-pill {
   font-size: 9px;
   color: var(--text-dim);

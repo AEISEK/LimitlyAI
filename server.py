@@ -159,43 +159,112 @@ def get_project_memory_config(workspace_path):
                 pass
     return None, None
 
-def get_agent_memory_info():
+def resolve_conversation_id(token=None, requested_cid=None):
+    """Determine the active conversation ID based on webview token, requested ID, or IDE focus."""
+    # 1. If explicit conversation ID requested and valid
+    if requested_cid:
+        tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{requested_cid}/.system_generated/logs/transcript.jsonl")
+        if os.path.exists(tpath):
+            return requested_cid
+
+    # 2. If token passed from webview URL (?token=...)
+    if token:
+        try:
+            path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                sess = json.loads(data.get("aux-pane-v2-session", "{}"))
+                for cid, pane in sess.get("conversationPanes", {}).items():
+                    for t in pane.get("tabs", []):
+                        url = t.get("content", {}).get("sidecarView", {}).get("url", "")
+                        if token in url:
+                            return cid
+        except Exception:
+            pass
+
+    # 3. Check projectsConversationOrder from app_storage.json (focused conversation in IDE)
+    try:
+        path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            order = json.loads(data.get("projectsConversationOrder", "[]"))
+            for cid in order:
+                tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+                if os.path.exists(tpath):
+                    return cid
+    except Exception:
+        pass
+
+    # 4. Fallback: newest modified transcript
+    pattern = os.path.expanduser(r"~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl")
+    files = glob.glob(pattern)
+    if files:
+        files.sort(key=os.path.getmtime, reverse=True)
+        return os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(files[0]))))
+
+    return None
+
+def get_recent_projects_list(current_cid=None):
+    """List recent open projects with conversation IDs and names for dropdown selector."""
+    projects = []
+    seen_convs = set()
+    try:
+        path = os.path.expanduser(r"~\AppData\Roaming\Antigravity\app_storage.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            order = json.loads(data.get("projectsConversationOrder", "[]"))
+            for cid in order[:10]:
+                if cid in seen_convs:
+                    continue
+                tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+                if not os.path.exists(tpath):
+                    continue
+                seen_convs.add(cid)
+                ws = get_workspace_for_conversation(cid)
+                pname = os.path.basename(ws) if ws else ""
+                if not pname:
+                    pname = f"Диалог {cid[:6]}"
+                projects.append({
+                    "conversation_id": cid,
+                    "project_name": pname,
+                    "workspace_path": ws or "",
+                    "is_active": (cid == current_cid)
+                })
+    except Exception:
+        pass
+    return projects
+
+def get_agent_memory_info(token=None, requested_cid=None):
     """Extract context token metrics from the active conversation transcript with project-level limit."""
     try:
-        pattern = os.path.expanduser(r"~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl")
-        files = glob.glob(pattern)
-        if not files:
-            return {"available": False, "reason": "Транскрипты не найдены"}
+        conv_id = resolve_conversation_id(token=token, requested_cid=requested_cid)
+        if not conv_id:
+            return {"available": False, "reason": "Активный диалог не найден"}
 
-        # Sort by modification time, inspect the latest
-        files.sort(key=os.path.getmtime, reverse=True)
-        
+        tpath = os.path.expanduser(f"~/.gemini/antigravity/brain/{conv_id}/.system_generated/logs/transcript.jsonl")
+        if not os.path.exists(tpath):
+            return {"available": False, "reason": f"Транскрипт диалога {conv_id} не найден"}
+
+        fsize = os.path.getsize(tpath)
+        read_bytes = min(fsize, 65536)
+        with open(tpath, "rb") as f:
+            if fsize > read_bytes:
+                f.seek(fsize - read_bytes)
+            chunk = f.read().decode("utf-8", errors="ignore")
+
+        lines = chunk.strip().split("\n")
         last_step = None
-        conv_id = ""
-        for fpath in files[:5]:
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
             try:
-                fsize = os.path.getsize(fpath)
-                if fsize == 0:
-                    continue
-                read_bytes = min(fsize, 65536)
-                with open(fpath, "rb") as f:
-                    if fsize > read_bytes:
-                        f.seek(fsize - read_bytes)
-                    chunk = f.read().decode("utf-8", errors="ignore")
-                lines = chunk.strip().split("\n")
-                for line in reversed(lines):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "input_tokens" in data and "cache_read_tokens" in data:
-                            last_step = data
-                            conv_id = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(fpath))))
-                            break
-                    except Exception:
-                        continue
-                if last_step:
+                data = json.loads(line)
+                if "input_tokens" in data and "cache_read_tokens" in data:
+                    last_step = data
                     break
             except Exception:
                 continue
@@ -244,12 +313,15 @@ def get_agent_memory_info():
             level = "normal"
             message = "Контекст в норме"
 
+        recent_projects = get_recent_projects_list(current_cid=conv_id)
+
         return {
             "available": True,
             "conversation_id": conv_id,
             "workspace_path": workspace_path or "",
             "project_name": project_name or "",
             "limit_source": cfg_source,
+            "recent_projects": recent_projects,
             "step_index": step_idx,
             "cache_read_tokens": cache_read,
             "input_tokens": input_tok,
@@ -566,10 +638,15 @@ class SidecarHandler(BaseHTTPRequestHandler):
         
         # API Routes
         if clean_path == "/api/status":
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            token = query_params.get("token", [""])[0]
+            requested_cid = query_params.get("conv_id", [""])[0]
+
             antigravity_data = fetch_antigravity_quota()
             claude_data = get_claude_status()
             codex_data = get_codex_status()
-            memory_data = get_agent_memory_info()
+            memory_data = get_agent_memory_info(token=token, requested_cid=requested_cid)
             if isinstance(antigravity_data, dict):
                 antigravity_data["agent_memory"] = memory_data
             record_quota_history(antigravity_data)
