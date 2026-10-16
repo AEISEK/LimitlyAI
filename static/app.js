@@ -625,10 +625,7 @@ function renderMemoryCard(mem) {
         </div>
       </div>`;
   } else {
-    adviceHtml = `
-      <div class="memory-tip">
-        <span>Лимит проекта: ~${fmtLimit} токенов (${limitSource}).</span>
-      </div>`;
+    adviceHtml = "";
   }
 
   const standardLimits = [128000, 160000, 200000, 260000, 500000, 1000000];
