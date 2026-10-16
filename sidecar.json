@@ -1,0 +1,18 @@
+{
+  "display_name": "LimitlyAI",
+  "description": "Мониторинг квот и таймеров сброса ИИ-ассистентов в боковой панели Antigravity 2.0",
+  "has_web_ui": true,
+  "command": "python",
+  "args": ["server.py"],
+  "restart_policy": "always",
+  "ui_config": {
+    "display_name": "LimitlyAI",
+    "views": [
+      {
+        "title": "LimitlyAI",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "path": "/"
+      }
+    ]
+  }
+}

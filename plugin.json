@@ -1,0 +1,11 @@
+{
+  "name": "limitlyai",
+  "displayName": "LimitlyAI",
+  "description": "Мониторинг квот и таймеров сброса ИИ-ассистентов (Google Antigravity, Claude, Codex) в реальном времени.",
+  "version": "1.4.3",
+  "suggestedPrompts": [
+    "Покажи текущие лимиты Antigravity",
+    "Сколько осталось до сброса квоты Claude?",
+    "Проверь статус расхода лимитов моделей"
+  ]
+}

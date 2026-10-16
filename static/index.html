@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LimitlyAI — AI Quota Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="panel-container">
+    <!-- Top Controls: Filter Tabs + View Mode Toggle -->
+    <div class="controls-bar">
+      <nav class="filter-nav">
+        <button class="filter-tab active" data-filter="all">Все</button>
+        <button class="filter-tab" data-filter="gemini">Gemini</button>
+        <button class="filter-tab" data-filter="claude">Claude</button>
+      </nav>
+      <div class="view-switcher" role="group" aria-label="Режим отображения">
+        <button id="btn-mode-compact" class="view-btn active" title="В одну строку (Компактный)" aria-label="В одну строку">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="6" x2="21" y2="6" stroke-linecap="round"></line>
+            <line x1="3" y1="12" x2="21" y2="12" stroke-linecap="round"></line>
+            <line x1="3" y1="18" x2="21" y2="18" stroke-linecap="round"></line>
+          </svg>
+        </button>
+        <button id="btn-mode-cards" class="view-btn" title="Карточки" aria-label="Карточки">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quota Cards List -->
+    <main id="quota-content" class="quota-list">
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Получение актуальных лимитов...</p>
+      </div>
+    </main>
+
+    <!-- Panel Footer -->
+    <footer class="panel-footer">
+      <div class="footer-left">
+        <span id="status-badge" class="badge badge-connecting">
+          <span class="status-dot"></span>
+          <span id="status-text">Загрузка...</span>
+        </span>
+        <span class="sync-clock" id="last-sync-time"></span>
+      </div>
+      <div class="footer-right">
+        <label class="auto-refresh-toggle" title="Включить / выключить автообновление">
+          <input type="checkbox" id="auto-refresh-check" checked>
+          <span>Авто</span>
+        </label>
+        <select id="interval-select" class="interval-select" title="Интервал автообновления">
+          <option value="1">1с</option>
+          <option value="5">5с</option>
+          <option value="10">10с</option>
+          <option value="30" selected>30с</option>
+          <option value="60">60с</option>
+        </select>
+        <button id="btn-refresh" class="btn-icon" title="Обновить квоты вручную" aria-label="Обновить">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19"/>
+          </svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
