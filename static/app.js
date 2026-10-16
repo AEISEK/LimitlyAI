@@ -514,8 +514,124 @@ function getActivityFeed(primary) {
   return (feed || []).slice(0, 4);
 }
 
+// Render Agent Context Window Memory Card (Память агента)
+function renderMemoryCard(mem) {
+  if (!mem || !mem.available) return "";
+
+  const isMemoryCollapsed = !!(appState.collapsedSections && appState.collapsedSections["memory"]);
+  const usedPct = mem.used_percent || 0;
+  const totalContext = mem.total_context_tokens || 0;
+  const contextLimit = mem.context_limit_tokens || 260000;
+  const cacheRead = mem.cache_read_tokens || 0;
+  const inputTokens = mem.input_tokens || 0;
+  const stepIndex = mem.step_index || 0;
+
+  const fmtTotal = totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext;
+  const fmtLimit = Math.round(contextLimit / 1000) + "k";
+  const fmtCache = cacheRead >= 1000 ? Math.round(cacheRead / 1000) + "k" : cacheRead;
+  const fmtInput = inputTokens >= 1000 ? (inputTokens >= 10000 ? Math.round(inputTokens / 1000) + "k" : (inputTokens / 1000).toFixed(1) + "k") : inputTokens;
+
+  let fillClass = "";
+  let badgeColor = "color:var(--text-dim);";
+  if (usedPct >= 85) {
+    fillClass = "fill-crit";
+    badgeColor = "color:#ffffff;font-weight:700;";
+  } else if (usedPct >= 70) {
+    fillClass = "fill-warn";
+    badgeColor = "color:#e4e4e7;font-weight:600;";
+  }
+
+  let adviceHtml = "";
+  if (usedPct >= 85) {
+    adviceHtml = `
+      <div class="memory-alert memory-alert-critical">
+        <div class="memory-alert-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 22 22 22 12 2"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div class="memory-alert-text">
+          <strong>Память критически заполнена (${usedPct}%)</strong>
+          <span>Контекст скоро будет урезан. Рекомендуется срочно ввести <code>/compact</code></span>
+        </div>
+      </div>`;
+  } else if (usedPct >= 70) {
+    adviceHtml = `
+      <div class="memory-alert memory-alert-warning">
+        <div class="memory-alert-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="memory-alert-text">
+          <strong>Память диалога заполнена на ${usedPct}%</strong>
+          <span>Рекомендуется выполнить <code>/compact</code> для сжатия до автоматической обрезки</span>
+        </div>
+      </div>`;
+  } else {
+    adviceHtml = `
+      <div class="memory-tip">
+        <span>Контекстное окно активно. Сжатие происходит при ~${fmtLimit} токенов.</span>
+      </div>`;
+  }
+
+  return `
+    <!-- Карточка памяти агента (Контекстное окно) -->
+    <div class="analytics-card collapsible-card ${isMemoryCollapsed ? 'card-collapsed' : ''}" id="sec-memory" onclick="toggleSection('memory', event)" title="${isMemoryCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
+      <div class="analytics-header collapsible-header">
+        <span class="analytics-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6z"/>
+            <path d="M14 2v4M10 2v4M14 18v4M10 18v4M2 14h4M2 10h4M18 14h4M18 10h4"/>
+          </svg>
+          Память агента
+        </span>
+        <div class="header-right">
+          <span class="collapsed-preview">${usedPct}% · ${fmtTotal}/${fmtLimit}</span>
+          <span class="header-badge expanded-badge" style="font-size:10px;${badgeColor}">${fmtTotal} / ${fmtLimit}</span>
+        </div>
+      </div>
+
+      <div class="collapsible-body">
+        <div class="memory-progress-wrap" title="Заполнение контекстного окна: ${totalContext.toLocaleString()} из ${contextLimit.toLocaleString()} токенов (${usedPct}%)">
+          <div class="memory-progress-bar">
+            <div class="memory-progress-fill ${fillClass}" style="width: ${usedPct}%;"></div>
+          </div>
+          <div class="memory-progress-labels">
+            <span class="memory-tokens">${fmtTotal} / ${fmtLimit} токенов</span>
+            <span class="memory-pct">${usedPct}%</span>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-tile" title="Кэшированные токены предыдущего контекста диалога: ${cacheRead.toLocaleString()}">
+            <span class="stat-val">${fmtCache}</span>
+            <span class="stat-lbl">Кэш</span>
+          </div>
+          <div class="stat-tile" title="Новые входные токены на последнем шаге: ${inputTokens.toLocaleString()}">
+            <span class="stat-val">${fmtInput}</span>
+            <span class="stat-lbl">Новые</span>
+          </div>
+          <div class="stat-tile" title="Номер последнего шага в диалоге: #${stepIndex}">
+            <span class="stat-val">#${stepIndex}</span>
+            <span class="stat-lbl">Шаг</span>
+          </div>
+        </div>
+
+        ${adviceHtml}
+      </div>
+    </div>`;
+}
+
 // Render Session Summary, Burn Rate, Chart, and Activity Feed (Пункты 1, 2, 3, 5)
 function renderAnalytics(ag) {
+  const mem = (appState.data && appState.data.agent_memory) || (ag && ag.agent_memory);
+  const memoryHtml = renderMemoryCard(mem);
+
   const groups = ag.groups || [];
   
   const buckets5h = [];
@@ -535,7 +651,9 @@ function renderAnalytics(ag) {
     });
   });
 
-  if (buckets5h.length === 0) return "";
+  if (buckets5h.length === 0) {
+    return memoryHtml ? `<div class="analytics-section">${memoryHtml}</div>` : "";
+  }
 
   const primary = buckets5h[0].bucket;
   const primaryName = buckets5h[0].group;
@@ -601,6 +719,7 @@ function renderAnalytics(ag) {
 
   return `
     <div class="analytics-section">
+      ${memoryHtml}
       <!-- 1. Карточка статистики сессии (Пункт 2 и 5) -->
       <div class="analytics-card collapsible-card ${isStatsCollapsed ? 'card-collapsed' : ''}" id="sec-stats" onclick="toggleSection('stats', event)" title="${isStatsCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
         <div class="analytics-header collapsible-header">

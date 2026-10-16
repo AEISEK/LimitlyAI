@@ -11,6 +11,7 @@ import json
 import ssl
 import re
 import time
+import glob
 import subprocess
 import urllib.request
 import urllib.error
@@ -93,6 +94,89 @@ def record_quota_history(ag_data):
             save_settings({"history": history})
     except Exception:
         pass
+
+def get_agent_memory_info():
+    """Extract context token metrics from the active conversation transcript."""
+    try:
+        pattern = os.path.expanduser(r"~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl")
+        files = glob.glob(pattern)
+        if not files:
+            return {"available": False, "reason": "Транскрипты не найдены"}
+
+        # Sort by modification time, inspect the latest
+        files.sort(key=os.path.getmtime, reverse=True)
+        
+        last_step = None
+        conv_id = ""
+        for fpath in files[:5]:
+            try:
+                fsize = os.path.getsize(fpath)
+                if fsize == 0:
+                    continue
+                read_bytes = min(fsize, 65536)
+                with open(fpath, "rb") as f:
+                    if fsize > read_bytes:
+                        f.seek(fsize - read_bytes)
+                    chunk = f.read().decode("utf-8", errors="ignore")
+                lines = chunk.strip().split("\n")
+                for line in reversed(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if "input_tokens" in data and "cache_read_tokens" in data:
+                            last_step = data
+                            conv_id = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(fpath))))
+                            break
+                    except Exception:
+                        continue
+                if last_step:
+                    break
+            except Exception:
+                continue
+
+        if not last_step:
+            return {"available": False, "reason": "Нет данных о токенах в активном диалоге"}
+
+        cache_read = int(last_step.get("cache_read_tokens", 0))
+        input_tok = int(last_step.get("input_tokens", 0))
+        output_tok = int(last_step.get("output_tokens", 0))
+        step_idx = int(last_step.get("step_index", 0))
+        created_at = last_step.get("created_at", "")
+
+        total_context = cache_read + input_tok
+        context_limit = 260000
+        used_pct = round(min(100.0, (total_context / context_limit) * 100.0), 1)
+
+        if used_pct >= 85.0:
+            level = "critical"
+            message = "Контекст критически заполнен! Рекомендуется вызвать /compact"
+        elif used_pct >= 70.0:
+            level = "warning"
+            message = "Память диалога заполнена более чем на 70%. Рекомендуется /compact"
+        else:
+            level = "normal"
+            message = "Контекст в норме"
+
+        return {
+            "available": True,
+            "conversation_id": conv_id,
+            "step_index": step_idx,
+            "cache_read_tokens": cache_read,
+            "input_tokens": input_tok,
+            "output_tokens": output_tok,
+            "total_context_tokens": total_context,
+            "context_limit_tokens": context_limit,
+            "used_percent": used_pct,
+            "remaining_tokens": max(0, context_limit - total_context),
+            "remaining_percent": round(max(0.0, 100.0 - used_pct), 1),
+            "level": level,
+            "message": message,
+            "updated_at": created_at
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
 
 # Cache for language server connection
 _ls_cache = {
@@ -344,12 +428,16 @@ class SidecarHandler(BaseHTTPRequestHandler):
             antigravity_data = fetch_antigravity_quota()
             claude_data = get_claude_status()
             codex_data = get_codex_status()
+            memory_data = get_agent_memory_info()
+            if isinstance(antigravity_data, dict):
+                antigravity_data["agent_memory"] = memory_data
             record_quota_history(antigravity_data)
             settings = load_settings()
             
             payload = {
                 "status": "online" if antigravity_data.get("online") else "offline",
                 "antigravity": antigravity_data,
+                "agent_memory": memory_data,
                 "claude": claude_data,
                 "codex": codex_data,
                 "settings": settings,
