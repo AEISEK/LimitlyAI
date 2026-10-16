@@ -627,12 +627,11 @@ function renderAnalytics(ag) {
 
           <!-- Burn Rate & Runway -->
           <div class="burn-rate-bar" title="${burnInfo.tooltip}">
-            <div class="burn-rate-item">
+            <div class="burn-rate-row">
               <span class="burn-label">Темп:</span>
               <span class="burn-value">${burnInfo.rateText}</span>
             </div>
-            <div class="burn-rate-divider"></div>
-            <div class="burn-rate-item">
+            <div class="burn-rate-row">
               <span class="burn-label">Прогноз:</span>
               <span class="burn-value ${burnInfo.isSafe ? 'burn-safe' : 'burn-warning'}">${burnInfo.runwayText}</span>
             </div>
