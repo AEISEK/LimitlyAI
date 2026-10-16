@@ -659,12 +659,12 @@ function renderMemoryCard(mem) {
           </div>
         </div>
 
-        <!-- Stats Tiles (Сжатие, Кэш, Новые, Шаг) -->
+        <!-- Stats Tiles (Память, Кэш, Новые, Шаг) -->
         <div class="stat-grid ${isCompacted ? 'stat-grid-4' : ''}">
           ${isCompacted ? `
-          <div class="stat-tile" title="Сжатие контекста: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
+          <div class="stat-tile" title="Память (сжатий контекста): выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
             <span class="stat-val">${compactCount}</span>
-            <span class="stat-lbl">Сжатие</span>
+            <span class="stat-lbl">Память</span>
           </div>` : ''}
           <div class="stat-tile" title="Кэшированные токены предыдущего контекста диалога: ${cacheRead.toLocaleString()}">
             <span class="stat-val">${fmtCache}</span>
