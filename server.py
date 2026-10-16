@@ -397,7 +397,11 @@ def get_agent_memory_info(token=None, requested_cid=None):
         cached_trans = _TRANSCRIPT_CACHE.get(conv_id)
         if cached_trans and cached_trans.get("fsize") == fsize and cached_trans.get("mtime") == fmtime:
             last_step = cached_trans["last_step"]
+            compact_count = cached_trans.get("compact_count", 0)
+            last_compact_step = cached_trans.get("last_compact_step", 0)
         else:
+            compact_count = 0
+            last_compact_step = 0
             read_bytes = min(fsize, 65536)
             with open(tpath, "rb") as f:
                 if fsize > read_bytes:
@@ -417,7 +421,28 @@ def get_agent_memory_info(token=None, requested_cid=None):
                         break
                 except Exception:
                     continue
-            _TRANSCRIPT_CACHE[conv_id] = {"fsize": fsize, "mtime": fmtime, "last_step": last_step}
+
+            # Fast scan for automatic context compactions
+            try:
+                with open(tpath, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if 'CHECKPOINT' in line and 'compaction' in line:
+                            compact_count += 1
+                            try:
+                                cdata = json.loads(line)
+                                last_compact_step = cdata.get("step_index", 0)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            _TRANSCRIPT_CACHE[conv_id] = {
+                "fsize": fsize,
+                "mtime": fmtime,
+                "last_step": last_step,
+                "compact_count": compact_count,
+                "last_compact_step": last_compact_step
+            }
 
         if not last_step:
             return {"available": False, "reason": "Нет данных о токенах в активном диалоге"}
@@ -481,6 +506,9 @@ def get_agent_memory_info(token=None, requested_cid=None):
             "used_percent": used_pct,
             "remaining_tokens": max(0, context_limit - total_context),
             "remaining_percent": round(max(0.0, 100.0 - used_pct), 1),
+            "is_compacted": (compact_count > 0),
+            "compact_count": compact_count,
+            "last_compact_step": last_compact_step,
             "level": level,
             "message": message,
             "updated_at": created_at

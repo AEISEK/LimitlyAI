@@ -576,6 +576,9 @@ function renderMemoryCard(mem) {
   const stepIndex = mem.step_index || 0;
   const projectName = mem.project_name || "Проект";
   const workspacePath = mem.workspace_path || "";
+  const compactCount = mem.compact_count || 0;
+  const isCompacted = !!mem.is_compacted && compactCount > 0;
+  const lastCompactStep = mem.last_compact_step || 0;
 
   const fmtLimit = (contextLimit >= 1048576) ? (contextLimit === 1048576 ? "1M" : `${(contextLimit / 1048576).toFixed(1)}M`) : (contextLimit >= 1000000 ? `${(contextLimit / 1000000).toFixed(1)}M` : `${Math.round(contextLimit / 1000)}k`);
   const fmtTotal = (totalContext >= 1048576) ? `${(totalContext / 1048576).toFixed(2)}M` : (totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext);
@@ -627,6 +630,10 @@ function renderMemoryCard(mem) {
     adviceHtml = "";
   }
 
+  const compactHeaderBadge = isCompacted
+    ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">⚡ ${compactCount}</span>`
+    : "";
+
   return `
     <!-- Карточка памяти агента (Контекстное окно) -->
     <div class="analytics-card collapsible-card ${isMemoryCollapsed ? 'card-collapsed' : ''}" id="sec-memory" onclick="toggleSection('memory', event)" title="${isMemoryCollapsed ? 'Нажмите, чтобы развернуть' : 'Нажмите, чтобы свернуть'}">
@@ -639,6 +646,7 @@ function renderMemoryCard(mem) {
           Память агента
         </span>
         <div class="header-right">
+          ${compactHeaderBadge}
           <span class="collapsed-preview">${projectName} · ${usedPct}% · ${fmtTotal}/${fmtLimit}</span>
           <span class="header-badge expanded-badge" style="font-size:10px;${badgeColor}">${projectName} · ${fmtTotal}/${fmtLimit}</span>
         </div>
@@ -652,12 +660,15 @@ function renderMemoryCard(mem) {
           </div>
           <div class="memory-progress-labels">
             <span class="memory-tokens">${fmtTotal} / ${fmtLimit} токенов</span>
-            <span class="memory-pct">${usedPct}%</span>
+            <div class="memory-labels-right">
+              ${isCompacted ? `<span class="badge-compact" title="Авто-сжатие памяти: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">⚡ Авто-сжатие</span>` : ''}
+              <span class="memory-pct">${usedPct}%</span>
+            </div>
           </div>
         </div>
 
-        <!-- 3 Stats Tiles -->
-        <div class="stat-grid">
+        <!-- Stats Tiles (Кэш, Новые, Авто-сжатие, Шаг) -->
+        <div class="stat-grid ${isCompacted ? 'stat-grid-4' : ''}">
           <div class="stat-tile" title="Кэшированные токены предыдущего контекста диалога: ${cacheRead.toLocaleString()}">
             <span class="stat-val">${fmtCache}</span>
             <span class="stat-lbl">Кэш</span>
@@ -666,6 +677,11 @@ function renderMemoryCard(mem) {
             <span class="stat-val">${fmtInput}</span>
             <span class="stat-lbl">Новые</span>
           </div>
+          ${isCompacted ? `
+          <div class="stat-tile" title="Авто-сжатие контекста: выполнено ${compactCount} раз (последнее на шаге #${lastCompactStep})">
+            <span class="stat-val stat-val-compact">${compactCount}</span>
+            <span class="stat-lbl">Авто-сжатие</span>
+          </div>` : ''}
           <div class="stat-tile" title="Номер последнего шага в диалоге: #${stepIndex}">
             <span class="stat-val">#${stepIndex}</span>
             <span class="stat-lbl">Шаг</span>
@@ -1032,6 +1048,7 @@ function render(force = false) {
       mem.context_limit_tokens,
       mem.project_name,
       mem.conversation_id,
+      mem.compact_count,
       (mem.recent_projects || []).length
     ] : null,
     appState.viewMode,

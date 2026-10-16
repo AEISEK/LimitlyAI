@@ -585,16 +585,25 @@ body {
   display: none;
 }
 
-/* 3 Stat Tiles */
+/* Stat Grid: 3 or 4 tiles */
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
 
+.stat-grid.stat-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
 @media (max-width: 250px) {
   .stat-grid {
     grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+  .stat-grid.stat-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
     gap: 4px;
   }
 }
@@ -627,10 +636,34 @@ body {
   white-space: nowrap;
 }
 
+.stat-val-compact {
+  color: #38bdf8;
+}
+
 .stat-lbl {
   font-size: 10px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+.badge-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-feature-settings: "tnum";
+}
+
+.memory-labels-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Activity Bars Chart */
