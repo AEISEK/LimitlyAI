@@ -468,12 +468,29 @@ def start_parent_watcher():
                 # Parent exited, cleanly exit
                 os._exit(0)
 
-        t = threading.Thread(target=_watch, daemon=True)
-        t.start()
+def cleanup_orphaned_servers():
+    """Kill any previous orphaned server.py processes on startup to prevent duplicates."""
+    try:
+        my_pid = os.getpid()
+        my_ppid = os.getppid()
+        ps_cmd = 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "server.py" } | ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)" }'
+        out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_cmd], text=True, timeout=3)
+        for line in out.splitlines():
+            line = line.strip()
+            if "|" in line:
+                pid_str, ppid_str = line.split("|", 1)
+                try:
+                    p = int(pid_str.strip())
+                    pp = int(ppid_str.strip())
+                    if p != my_pid and p != my_ppid:
+                        os.kill(p, 9)
+                except Exception:
+                    pass
     except Exception:
         pass
 
 def main():
+    cleanup_orphaned_servers()
     start_parent_watcher()
     port = int(os.environ.get("ANTIGRAVITY_SIDECAR_WEB_PORT", 8765))
     server = HTTPServer(("127.0.0.1", port), SidecarHandler)
