@@ -514,6 +514,38 @@ function getActivityFeed(primary) {
   return (feed || []).slice(0, 4);
 }
 
+// Change project memory limit via API and update .limitlyai.json
+async function changeProjectMemoryLimit(newLimit, encodedWsPath) {
+  const wsPath = decodeURIComponent(encodedWsPath || "");
+  const limitVal = parseInt(newLimit, 10);
+  if (!limitVal || isNaN(limitVal)) return;
+
+  try {
+    const resp = await fetch("/api/project_limit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_path: wsPath,
+        limit: limitVal,
+        save_to_file: true
+      })
+    });
+    if (resp.ok) {
+      const res = await resp.json();
+      if (res.agent_memory && appState.data) {
+        appState.data.agent_memory = res.agent_memory;
+        if (appState.data.antigravity) {
+          appState.data.antigravity.agent_memory = res.agent_memory;
+        }
+      }
+      render();
+    }
+  } catch (err) {
+    console.error("[LimitlyAI] Failed to update project memory limit:", err);
+  }
+}
+window.changeProjectMemoryLimit = changeProjectMemoryLimit;
+
 // Render Agent Context Window Memory Card (Память агента)
 function renderMemoryCard(mem) {
   if (!mem || !mem.available) return "";
@@ -525,6 +557,9 @@ function renderMemoryCard(mem) {
   const cacheRead = mem.cache_read_tokens || 0;
   const inputTokens = mem.input_tokens || 0;
   const stepIndex = mem.step_index || 0;
+  const projectName = mem.project_name || "Проект";
+  const workspacePath = mem.workspace_path || "";
+  const limitSource = mem.limit_source || "по умолчанию";
 
   const fmtTotal = totalContext >= 1000 ? Math.round(totalContext / 1000) + "k" : totalContext;
   const fmtLimit = Math.round(contextLimit / 1000) + "k";
@@ -554,7 +589,7 @@ function renderMemoryCard(mem) {
         </div>
         <div class="memory-alert-text">
           <strong>Память критически заполнена (${usedPct}%)</strong>
-          <span>Контекст скоро будет урезан. Рекомендуется срочно ввести <code>/compact</code></span>
+          <span>Лимит проекта: ${fmtLimit}. Рекомендуется срочно ввести <code>/compact</code></span>
         </div>
       </div>`;
   } else if (usedPct >= 70) {
@@ -569,15 +604,18 @@ function renderMemoryCard(mem) {
         </div>
         <div class="memory-alert-text">
           <strong>Память диалога заполнена на ${usedPct}%</strong>
-          <span>Рекомендуется выполнить <code>/compact</code> для сжатия до автоматической обрезки</span>
+          <span>Лимит проекта: ${fmtLimit}. Рекомендуется выполнить <code>/compact</code></span>
         </div>
       </div>`;
   } else {
     adviceHtml = `
       <div class="memory-tip">
-        <span>Контекстное окно активно. Сжатие происходит при ~${fmtLimit} токенов.</span>
+        <span>Лимит проекта: ~${fmtLimit} токенов (${limitSource}).</span>
       </div>`;
   }
+
+  const standardLimits = [128000, 160000, 200000, 260000, 500000, 1000000];
+  const isCustomLimit = !standardLimits.includes(contextLimit);
 
   return `
     <!-- Карточка памяти агента (Контекстное окно) -->
@@ -591,12 +629,36 @@ function renderMemoryCard(mem) {
           Память агента
         </span>
         <div class="header-right">
-          <span class="collapsed-preview">${usedPct}% · ${fmtTotal}/${fmtLimit}</span>
-          <span class="header-badge expanded-badge" style="font-size:10px;${badgeColor}">${fmtTotal} / ${fmtLimit}</span>
+          <span class="collapsed-preview">${projectName} · ${usedPct}% · ${fmtTotal}/${fmtLimit}</span>
+          <span class="header-badge expanded-badge" style="font-size:10px;${badgeColor}">${projectName} · ${fmtTotal}/${fmtLimit}</span>
         </div>
       </div>
 
       <div class="collapsible-body">
+        <!-- Project & Limit Selector Bar -->
+        <div class="memory-project-bar">
+          <div class="memory-project-info" title="Каталог проекта: ${workspacePath}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span class="memory-project-name">${projectName}</span>
+            <span class="memory-source-pill" title="Источник лимита: ${limitSource}">${limitSource}</span>
+          </div>
+          <div class="memory-limit-selector" onclick="event.stopPropagation()">
+            <label for="select-proj-limit">Лимит:</label>
+            <select id="select-proj-limit" class="proj-limit-select" title="Изменить лимит проекта (сохраняется в .limitlyai.json)" onchange="changeProjectMemoryLimit(this.value, '${encodeURIComponent(workspacePath)}')">
+              <option value="128000" ${contextLimit === 128000 ? 'selected' : ''}>128k</option>
+              <option value="160000" ${contextLimit === 160000 ? 'selected' : ''}>160k</option>
+              <option value="200000" ${contextLimit === 200000 ? 'selected' : ''}>200k (Claude)</option>
+              <option value="260000" ${contextLimit === 260000 ? 'selected' : ''}>260k (Gemini)</option>
+              <option value="500000" ${contextLimit === 500000 ? 'selected' : ''}>500k</option>
+              <option value="1000000" ${contextLimit === 1000000 ? 'selected' : ''}>1M (Pro)</option>
+              ${isCustomLimit ? `<option value="${contextLimit}" selected>${fmtLimit}</option>` : ''}
+            </select>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
         <div class="memory-progress-wrap" title="Заполнение контекстного окна: ${totalContext.toLocaleString()} из ${contextLimit.toLocaleString()} токенов (${usedPct}%)">
           <div class="memory-progress-bar">
             <div class="memory-progress-fill ${fillClass}" style="width: ${usedPct}%;"></div>
@@ -607,6 +669,7 @@ function renderMemoryCard(mem) {
           </div>
         </div>
 
+        <!-- 3 Stats Tiles -->
         <div class="stat-grid">
           <div class="stat-tile" title="Кэшированные токены предыдущего контекста диалога: ${cacheRead.toLocaleString()}">
             <span class="stat-val">${fmtCache}</span>

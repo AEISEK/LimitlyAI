@@ -815,6 +815,89 @@ body {
 }
 
 /* Agent Context Memory Card (Память агента) */
+.memory-project-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.memory-project-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.memory-project-info svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.memory-project-name {
+  font-weight: 600;
+  color: #e4e4e7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.memory-source-pill {
+  font-size: 9px;
+  color: var(--text-dim);
+  background: #1c1c21;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  font-feature-settings: "tnum";
+}
+
+.memory-limit-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.memory-limit-selector label {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.proj-limit-select {
+  background: var(--bg-card);
+  color: #f4f4f5;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.proj-limit-select:hover {
+  border-color: #3f3f46;
+  background: var(--bg-card-hover);
+}
+
+.proj-limit-select option {
+  background: var(--bg-card);
+  color: #fff;
+}
+
 .memory-progress-wrap {
   display: flex;
   flex-direction: column;

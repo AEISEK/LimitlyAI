@@ -12,9 +12,11 @@ import ssl
 import re
 import time
 import glob
+import sqlite3
 import subprocess
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -29,6 +31,8 @@ DEFAULT_SETTINGS = {
     "filter": "all",
     "auto_refresh": True,
     "refresh_interval": 30,
+    "default_memory_limit": 260000,
+    "project_limits": {},
     "history": []
 }
 
@@ -49,8 +53,7 @@ def save_settings(new_settings):
     """Save persistent settings to disk atomically."""
     current = load_settings()
     for k, v in new_settings.items():
-        if k in DEFAULT_SETTINGS or k == "history":
-            current[k] = v
+        current[k] = v
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         temp_file = SETTINGS_FILE.with_suffix(".tmp")
@@ -95,8 +98,69 @@ def record_quota_history(ag_data):
     except Exception:
         pass
 
+def parse_token_limit(val, default=260000):
+    """Parse integer or shorthand string ('200k', '1M', 180000) into integer tokens."""
+    if not val:
+        return default
+    if isinstance(val, (int, float)):
+        return int(val)
+    val_str = str(val).strip().lower()
+    try:
+        if val_str.endswith("m"):
+            return int(float(val_str[:-1]) * 1000000)
+        if val_str.endswith("k"):
+            return int(float(val_str[:-1]) * 1000)
+        return int(float(val_str))
+    except (ValueError, TypeError):
+        return default
+
+def get_workspace_for_conversation(conv_id):
+    """Extract project root folder from Antigravity conversation db trajectory metadata."""
+    if not conv_id:
+        return None
+    db_path = os.path.expanduser(f"~/.gemini/antigravity/conversations/{conv_id}.db")
+    if not os.path.exists(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(db_path, timeout=1.0)
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM trajectory_metadata_blob WHERE id='main'")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            text = row[0].decode("utf-8", errors="ignore")
+            matches = re.findall(r'file:///([a-zA-Z]:/[^\x00-\x1f\x7f"\':]+)', text)
+            if matches:
+                path = os.path.normpath(urllib.parse.unquote(matches[0]))
+                if os.path.isdir(path):
+                    return path
+    except Exception:
+        pass
+    return None
+
+def get_project_memory_config(workspace_path):
+    """Read memory_limit from .limitlyai.json or limitlyai.json in the project root."""
+    if not workspace_path or not os.path.isdir(workspace_path):
+        return None, None
+    candidates = [
+        os.path.join(workspace_path, ".limitlyai.json"),
+        os.path.join(workspace_path, "limitlyai.json"),
+        os.path.join(workspace_path, ".limitlyai")
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    lim = data.get("memory_limit") or data.get("memory_limit_tokens") or data.get("limit")
+                    if lim:
+                        return parse_token_limit(lim), os.path.basename(c)
+            except Exception:
+                pass
+    return None, None
+
 def get_agent_memory_info():
-    """Extract context token metrics from the active conversation transcript."""
+    """Extract context token metrics from the active conversation transcript with project-level limit."""
     try:
         pattern = os.path.expanduser(r"~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl")
         files = glob.glob(pattern)
@@ -145,8 +209,29 @@ def get_agent_memory_info():
         step_idx = int(last_step.get("step_index", 0))
         created_at = last_step.get("created_at", "")
 
+        # Project detection & custom project limit
+        workspace_path = get_workspace_for_conversation(conv_id)
+        project_name = os.path.basename(workspace_path) if workspace_path else ""
+        
+        # 1. Project config file (.limitlyai.json)
+        proj_limit, cfg_source = get_project_memory_config(workspace_path)
+        
+        # 2. Settings project_limits
+        settings = load_settings()
+        if not proj_limit and workspace_path:
+            p_limits = settings.get("project_limits", {})
+            stored = p_limits.get(workspace_path) or p_limits.get(project_name)
+            if stored:
+                proj_limit = parse_token_limit(stored)
+                cfg_source = "настройки LimitlyAI"
+
+        # 3. Default fallback
+        if not proj_limit:
+            proj_limit = parse_token_limit(settings.get("default_memory_limit", 260000))
+            cfg_source = "стандарт (260k)"
+
+        context_limit = proj_limit
         total_context = cache_read + input_tok
-        context_limit = 260000
         used_pct = round(min(100.0, (total_context / context_limit) * 100.0), 1)
 
         if used_pct >= 85.0:
@@ -162,6 +247,9 @@ def get_agent_memory_info():
         return {
             "available": True,
             "conversation_id": conv_id,
+            "workspace_path": workspace_path or "",
+            "project_name": project_name or "",
+            "limit_source": cfg_source,
             "step_index": step_idx,
             "cache_read_tokens": cache_read,
             "input_tokens": input_tok,
@@ -404,6 +492,59 @@ class SidecarHandler(BaseHTTPRequestHandler):
                 data = json.loads(body.decode("utf-8"))
                 saved = save_settings(data)
                 resp = json.dumps({"status": "ok", "settings": saved}, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+            except Exception as e:
+                err_resp = json.dumps({"status": "error", "message": str(e)}).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err_resp)))
+                self.end_headers()
+                self.wfile.write(err_resp)
+            return
+
+        if clean_path == "/api/project_limit":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+                data = json.loads(body.decode("utf-8"))
+                ws_path = data.get("workspace_path")
+                new_lim = parse_token_limit(data.get("limit", 260000))
+                save_file = data.get("save_to_file", True)
+
+                file_saved = False
+                if ws_path and os.path.isdir(ws_path) and save_file:
+                    target_cfg = os.path.join(ws_path, ".limitlyai.json")
+                    try:
+                        cfg_content = {}
+                        if os.path.isfile(target_cfg):
+                            with open(target_cfg, "r", encoding="utf-8") as f:
+                                cfg_content = json.load(f)
+                        cfg_content["memory_limit"] = new_lim
+                        with open(target_cfg, "w", encoding="utf-8") as f:
+                            json.dump(cfg_content, f, indent=2, ensure_ascii=False)
+                        file_saved = True
+                    except Exception as e:
+                        print(f"[LimitlyAI] Error writing .limitlyai.json: {e}", file=sys.stderr)
+
+                # Persist to settings
+                settings = load_settings()
+                p_limits = settings.get("project_limits", {})
+                if ws_path:
+                    p_limits[ws_path] = new_lim
+                settings["project_limits"] = p_limits
+                save_settings({"project_limits": p_limits})
+
+                updated_mem = get_agent_memory_info()
+                resp = json.dumps({
+                    "status": "ok",
+                    "limit": new_lim,
+                    "file_saved": file_saved,
+                    "agent_memory": updated_mem
+                }, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(resp)))
